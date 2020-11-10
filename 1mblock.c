@@ -11,14 +11,15 @@
 
 #define TRUE 1
 #define FALSE 0 
+#define HASH_MOD 2470312487
 
 int filter_flag;
-char* http_method[8] = {"GET", "POST", "HEAD", "OPTIONS", "PUT", "DELETE", "TRACE", "CONNECT"};
+char* http_method[6] = {"GET", "POST", "HEAD", "OPTIONS", "PUT", "DELETE"};
 
 struct siteinfo {
 	int len;
 	char firstch;
-	char siteurl[90];
+	unsigned long int urlhash[2];
 };
 
 struct siteinfo ban_list[800000];
@@ -27,6 +28,29 @@ int site_cnt;
 void usage() {
     printf("syntax : 1m-block <site list .txt file>\n");
 	printf("sample : sample : 1m-block top-1m.txt\n");
+}
+
+unsigned long int hash(char *url, int len, int index)
+{
+	unsigned long int val = 401;
+	for(int i = 0; i < len; i++) {
+		val = (val << (index + 4) + (int)url[i]) % HASH_MOD;
+	}
+
+	return val;
+}
+
+int hash_check(char *host, int host_len, int site_index) 
+{
+	int flag = TRUE;
+	for(int i = 0; i < 2; i++) {
+		if(ban_list[site_index].urlhash[i] != hash(host, host_len, i)) {
+			flag = FALSE;
+			break;
+		}
+	}
+
+	return flag;
 }
 
 void dump(unsigned char* buf, int size) {
@@ -95,7 +119,7 @@ static u_int32_t print_pkt (struct nfq_data *tb)
 
 	// HTTP check!
 	int http_flag = FALSE;
-	for(int i = 0; i < 8; i++) {
+	for(int i = 0; i < 6; i++) {
 		if(!memcmp(data + iphdr_len + tcphdr_len, http_method[i], strlen(http_method[i]))) {
 			http_flag = TRUE;
 			break;
@@ -120,8 +144,9 @@ static u_int32_t print_pkt (struct nfq_data *tb)
 		for(int i = 0; i < site_cnt; i++){
 			if(host_index != ban_list[i].len) continue;
 			if(hosturl[0] != ban_list[i].firstch) continue;
-			if(!memcmp(ban_list[i].siteurl, hosturl, ban_list[i].len)) {
+			if(hash_check(hosturl, host_index, i)) {
 				filter_flag = TRUE;
+				printf("Blocked! %s\n", hosturl);
 				break;
 			}
 		}
@@ -163,7 +188,7 @@ int main(int argc, char **argv)
         if(fgets(buffer, sizeof(buffer), fp) == NULL) break;
         ban_list[site_cnt].len = (int)strlen(buffer) - 2; // eliminate null byte
         ban_list[site_cnt].firstch = buffer[0];
-        strncpy(ban_list[site_cnt].siteurl, buffer, ban_list[site_cnt].len);
+        for(int i = 0; i < 2; i++) ban_list[site_cnt].urlhash[i] = hash(buffer, ban_list[site_cnt].len, i);
         site_cnt++;
     }
 
